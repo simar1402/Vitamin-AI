@@ -4,43 +4,62 @@ import { runDailyDigest } from "@/lib/digest/send-digest";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-/** Temporary auth debug — logs TRUE/FALSE only, never secret values. */
-function logAuthDebug(req: NextRequest): void {
-  const secret = process.env.CRON_SECRET;
-  const authHeader = req.headers.get("authorization");
-  const querySecret = req.nextUrl.searchParams.get("secret");
-
-  console.info("[api/send-daily-digest] auth-debug", {
-    cronSecretExists: Boolean(secret),
-    querySecretParamPresent: req.nextUrl.searchParams.has("secret"),
-    querySecretMatches: Boolean(secret && querySecret && querySecret === secret),
-    authorizationHeaderMatches: Boolean(
-      secret && authHeader === `Bearer ${secret}`,
-    ),
-  });
+export interface AuthDebugFlags {
+  cronSecretExists: boolean;
+  querySecretParamPresent: boolean;
+  querySecretMatches: boolean;
+  authorizationHeaderMatches: boolean;
 }
 
-function isAuthorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
+function normalizeSecret(value: string | null | undefined): string {
+  return value?.trim() ?? "";
+}
+
+function parseBearerToken(authHeader: string | null): string {
+  if (!authHeader) return "";
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match ? normalizeSecret(match[1]) : "";
+}
+
+/**
+ * Validates cron access using process.env.CRON_SECRET.
+ * Accepts ?secret=<CRON_SECRET> OR Authorization: Bearer <CRON_SECRET>.
+ */
+function checkAuth(req: NextRequest): { authorized: boolean; debug: AuthDebugFlags } {
+  const secret = normalizeSecret(process.env.CRON_SECRET);
+  const querySecret = normalizeSecret(req.nextUrl.searchParams.get("secret"));
+  const bearerToken = parseBearerToken(req.headers.get("authorization"));
+
+  const debug: AuthDebugFlags = {
+    cronSecretExists: secret.length > 0,
+    querySecretParamPresent: req.nextUrl.searchParams.has("secret"),
+    querySecretMatches: secret.length > 0 && querySecret.length > 0 && querySecret === secret,
+    authorizationHeaderMatches:
+      secret.length > 0 && bearerToken.length > 0 && bearerToken === secret,
+  };
+
   if (!secret) {
     console.warn("[api/send-daily-digest] CRON_SECRET not set — allowing request");
-    return true;
+    return { authorized: true, debug };
   }
 
-  const authHeader = req.headers.get("authorization");
-  if (authHeader === `Bearer ${secret}`) return true;
-
-  const querySecret = req.nextUrl.searchParams.get("secret");
-  return querySecret === secret;
+  const authorized = debug.querySecretMatches || debug.authorizationHeaderMatches;
+  return { authorized, debug };
 }
 
 export async function GET(req: NextRequest) {
-  logAuthDebug(req);
+  const { authorized, debug } = checkAuth(req);
 
-  if (!isAuthorized(req)) {
-    console.warn("[api/send-daily-digest] Unauthorized request");
+  console.info("[api/send-daily-digest] auth-debug", debug);
+
+  if (!authorized) {
+    console.warn("[api/send-daily-digest] Unauthorized request", debug);
     return NextResponse.json(
-      { result: "ERROR", message: "Unauthorized" },
+      {
+        result: "ERROR",
+        message: "Unauthorized",
+        authDebug: debug,
+      },
       { status: 401 },
     );
   }
