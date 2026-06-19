@@ -65,10 +65,19 @@ export async function GET(req: NextRequest) {
   }
 
   const testMode = req.nextUrl.searchParams.get("test") === "true";
+  const cronTrigger = req.headers.get("x-vercel-cron") === "1";
 
   try {
-    console.info(`[api/send-daily-digest] Triggered (test=${testMode})`);
+    console.info(
+      `[api/send-daily-digest] Triggered (test=${testMode}, cron=${cronTrigger})`,
+    );
     const summary = await runDailyDigest({ testMode });
+
+    console.info("[api/send-daily-digest] run complete", {
+      usersFound: summary.usersFound,
+      emailsSent: summary.sent,
+      emailsFailed: summary.failed,
+    });
 
     const status = summary.sent > 0 ? 200 : summary.failed > 0 ? 207 : 200;
 
@@ -78,6 +87,11 @@ export async function GET(req: NextRequest) {
         message: testMode
           ? "Test daily digest completed"
           : "Daily digest completed",
+        stats: {
+          usersFound: summary.usersFound,
+          emailsSent: summary.sent,
+          emailsFailed: summary.failed,
+        },
         summary,
       },
       { status },

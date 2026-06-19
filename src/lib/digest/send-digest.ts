@@ -26,13 +26,14 @@ async function loadDigestRecipients(): Promise<DigestRecipient[]> {
 
   const { data: profiles, error: profileError } = await supabase
     .from("profiles")
-    .select("id, full_name, profession, onboarded")
-    .eq("onboarded", true)
+    .select("id, full_name, profession")
     .not("profession", "is", null);
 
   if (profileError) {
     throw new Error(`Failed to load profiles: ${profileError.message}`);
   }
+
+  console.info(`[digest] profiles loaded from Supabase: ${profiles?.length ?? 0}`);
 
   const { data: authData, error: authError } = await supabase.auth.admin.listUsers({
     perPage: 1000,
@@ -68,6 +69,7 @@ async function loadDigestRecipients(): Promise<DigestRecipient[]> {
     });
   }
 
+  console.info(`[digest] users found: ${recipients.length}`);
   return recipients;
 }
 
@@ -139,10 +141,14 @@ export async function runDailyDigest(options: {
 
   if (recipients.length === 0) {
     errors.push("No eligible recipients found");
+    console.info("[digest] users found: 0");
+    console.info("[digest] emails sent: 0");
+    console.info("[digest] emails failed: 0");
     return {
       mode: options.testMode ? "test" : "production",
       startedAt,
       finishedAt: new Date().toISOString(),
+      usersFound: 0,
       recipients: 0,
       sent: 0,
       failed: 0,
@@ -188,14 +194,15 @@ export async function runDailyDigest(options: {
   const failed = results.filter((r) => !r.success).length;
   const skipped = recipients.length - results.length;
 
-  console.info(
-    `[digest] Finished: recipients=${recipients.length} sent=${sent} failed=${failed}`,
-  );
+  console.info(`[digest] users found: ${recipients.length}`);
+  console.info(`[digest] emails sent: ${sent}`);
+  console.info(`[digest] emails failed: ${failed}`);
 
   return {
     mode: options.testMode ? "test" : "production",
     startedAt,
     finishedAt: new Date().toISOString(),
+    usersFound: recipients.length,
     recipients: recipients.length,
     sent,
     failed,

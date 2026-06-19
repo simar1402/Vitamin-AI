@@ -28,6 +28,8 @@ export interface DailyDigestRunResult {
   mode: "production" | "test";
   startedAt: string;
   finishedAt: string;
+  /** Total eligible users loaded from Supabase profiles. */
+  usersFound: number;
   recipients: number;
   sent: number;
   failed: number;
