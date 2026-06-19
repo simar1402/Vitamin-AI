@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { agentLog, userIdHint } from "@/lib/debug-agent-log";
-import { maybeSendWelcomeEmail } from "@/lib/welcome-email/send-welcome-email";
+import { sendWelcomeEmailOnce } from "@/lib/welcome-email/send-welcome-email";
 
 const PrefsSchema = z.object({
   profession: z.string().min(1).max(80),
@@ -25,7 +25,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("profession, content_types, onboarded, full_name")
+    .select("profession, content_types, onboarded, full_name, welcome_email_sent")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -79,6 +79,12 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  console.info("[prefs/route.ts:PUT] Profile save request", {
+    userHint: userIdHint(user.id),
+    emailPresent: Boolean(user.email),
+    authCreatedAt: user.created_at ?? null,
+  });
+
   let body: unknown;
   try {
     body = await req.json();
@@ -100,6 +106,51 @@ export async function PUT(req: Request) {
     user.user_metadata?.full_name ??
     user.user_metadata?.name ??
     null;
+
+  // Load existing profile BEFORE upsert to detect first-time onboarding completion
+  const { data: existingProfile, error: existingError } = await supabase
+    .from("profiles")
+    .select("onboarded, welcome_email_sent, profession, created_at")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (existingError) {
+    console.error("[prefs/route.ts:PUT] Failed to load existing profile:", existingError.message);
+  } else if (!existingProfile) {
+    console.info("[prefs/route.ts:PUT] Profile created — first save for user", {
+      userHint: userIdHint(user.id),
+    });
+  } else {
+    console.info("[prefs/route.ts:PUT] Existing profile loaded", {
+      userHint: userIdHint(user.id),
+      wasOnboarded: existingProfile.onboarded,
+      welcomeEmailSent: existingProfile.welcome_email_sent ?? false,
+      previousProfession: existingProfile.profession,
+    });
+  }
+
+  console.info("[prefs/route.ts:PUT] Profession selected", {
+    userHint: userIdHint(user.id),
+    profession,
+    onboarded,
+  });
+
+  const wasOnboarded = existingProfile?.onboarded ?? false;
+  const welcomeAlreadySent = existingProfile?.welcome_email_sent ?? false;
+  const isFirstOnboardingCompletion =
+    onboarded &&
+    !wasOnboarded &&
+    !welcomeAlreadySent &&
+    Boolean(profession) &&
+    Boolean(user.email);
+
+  if (isFirstOnboardingCompletion) {
+    console.info("[prefs/route.ts:PUT] New user detected — first onboarding completion", {
+      userHint: userIdHint(user.id),
+      email: user.email,
+      profession,
+    });
+  }
 
   const { error } = await supabase.from("profiles").upsert(
     {
@@ -125,6 +176,12 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "Failed to save profile" }, { status: 500 });
   }
 
+  console.info("[prefs/route.ts:PUT] Profile saved successfully", {
+    userHint: userIdHint(user.id),
+    profession,
+    onboarded,
+  });
+
   agentLog(
     "prefs/route.ts:PUT",
     "upsert ok",
@@ -137,22 +194,35 @@ export async function PUT(req: Request) {
     "H1",
   );
 
-  // One-time welcome email after onboarding completes (non-blocking for client)
-  if (onboarded && user.email) {
-    void maybeSendWelcomeEmail({
+  let welcomeEmailResult = null;
+
+  // Await send — fire-and-forget is killed when the Vercel function returns
+  if (isFirstOnboardingCompletion && user.email) {
+    welcomeEmailResult = await sendWelcomeEmailOnce({
       userId: user.id,
       email: user.email,
       fullName: resolvedName,
-    }).then((result) => {
-      console.info("[prefs/route.ts:PUT] welcome email result", {
-        userHint: userIdHint(user.id),
-        sent: result.sent,
-        skipped: result.skipped,
-        reason: result.reason ?? null,
-        error: result.error ?? null,
-      });
+      profession,
+    });
+
+    console.info("[prefs/route.ts:PUT] Welcome email flow finished", {
+      userHint: userIdHint(user.id),
+      sent: welcomeEmailResult.sent,
+      skipped: welcomeEmailResult.skipped,
+      reason: welcomeEmailResult.reason ?? null,
+      error: welcomeEmailResult.error ?? null,
+      messageId: welcomeEmailResult.messageId ?? null,
+    });
+  } else if (onboarded && user.email) {
+    console.info("[prefs/route.ts:PUT] Welcome email skipped — not first onboarding", {
+      userHint: userIdHint(user.id),
+      wasOnboarded,
+      welcomeAlreadySent,
     });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    welcomeEmail: welcomeEmailResult,
+  });
 }

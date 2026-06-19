@@ -32,6 +32,26 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        const createdMs = new Date(user.created_at).getTime();
+        const isNewUser = Date.now() - createdMs < 120_000;
+        console.info("[auth/callback] User authenticated", {
+          userHint: user.id.slice(0, 8),
+          emailPresent: Boolean(user.email),
+          isNewUser,
+          createdAt: user.created_at,
+        });
+        if (isNewUser) {
+          console.info("[auth/callback] New user detected — profile row created by Supabase trigger", {
+            userHint: user.id.slice(0, 8),
+          });
+        }
+      }
+
       const next = requestedNext ?? "/feed";
       const destination = `${siteUrl}${next.startsWith("/") ? next : `/${next}`}`;
       console.info("[auth/callback] Session established, redirecting", {
