@@ -5,7 +5,8 @@ export function agentLog(
   data: Record<string, unknown>,
   hypothesisId: string,
   runId = "pre-fix",
-) {
+): void {
+  if (process.env.NODE_ENV !== "development") return;
   // #region agent log
   fetch("http://127.0.0.1:7686/ingest/e78a88d4-a732-4c34-857a-20f65bdd52e7", {
     method: "POST",

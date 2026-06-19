@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { getAuthCallbackUrl, getRequestSiteUrl } from "@/lib/site-url";
 
 // Routes that are always public (no auth required)
 const PUBLIC_PATHS = ["/", "/auth/callback"];
@@ -11,7 +12,23 @@ function isPublic(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, searchParams } = request.nextUrl;
+
+  // Supabase may redirect to Site URL with ?code= on / instead of /auth/callback
+  const oauthCode = searchParams.get("code");
+  if (oauthCode && pathname !== "/auth/callback") {
+    const siteUrl = getRequestSiteUrl(request);
+    const callback = new URL(getAuthCallbackUrl(siteUrl));
+    searchParams.forEach((value, key) => {
+      callback.searchParams.set(key, value);
+    });
+    console.info("[middleware] OAuth code on non-callback path — redirecting", {
+      fromPath: pathname,
+      toPath: callback.pathname,
+      siteUrl,
+    });
+    return NextResponse.redirect(callback);
+  }
 
   let response = NextResponse.next({
     request: { headers: request.headers },
@@ -35,27 +52,18 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  // Refresh the session — this keeps the JWT alive automatically
   const { data } = await supabase.auth.getUser();
   const isAuthenticated = !!data.user;
 
-  // Redirect unauthenticated users away from protected pages → homepage
   if (!isAuthenticated && !isPublic(pathname)) {
     return NextResponse.redirect(new URL("/", request.url));
   }
-
-  // Do NOT auto-redirect authenticated users on "/" — let the homepage
-  // render its own logged-in state so sign-out lands cleanly here.
 
   return response;
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match all paths except static assets, API routes, and Next.js internals.
-     * API routes handle their own auth — skipping them here avoids double Supabase calls.
-     */
     "/((?!_next/static|_next/image|favicon.ico|api/|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico)).*)",
   ],
 };

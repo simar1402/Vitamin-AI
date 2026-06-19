@@ -12,6 +12,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { clearPreferences } from "@/lib/local-prefs";
 import { agentLog, userIdHint } from "@/lib/debug-agent-log";
+import { getAuthCallbackUrl, getClientSiteUrl } from "@/lib/site-url";
 
 interface AuthContextValue {
   session: Session | null;
@@ -64,10 +65,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   const signInWithGoogle = useCallback(async () => {
+    const siteUrl = getClientSiteUrl();
+    const redirectTo = getAuthCallbackUrl(siteUrl);
+
+    console.info("[auth] Starting Google OAuth", {
+      siteUrl,
+      redirectTo,
+      browserOrigin:
+        typeof window !== "undefined" ? window.location.origin : "ssr",
+      configuredSiteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? null,
+    });
+
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo,
         scopes: "email profile",
         queryParams: {
           // Always show the Google account picker, never silently reuse a session
