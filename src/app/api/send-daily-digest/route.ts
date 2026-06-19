@@ -4,6 +4,22 @@ import { runDailyDigest } from "@/lib/digest/send-digest";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+/** Temporary auth debug — logs TRUE/FALSE only, never secret values. */
+function logAuthDebug(req: NextRequest): void {
+  const secret = process.env.CRON_SECRET;
+  const authHeader = req.headers.get("authorization");
+  const querySecret = req.nextUrl.searchParams.get("secret");
+
+  console.info("[api/send-daily-digest] auth-debug", {
+    cronSecretExists: Boolean(secret),
+    querySecretParamPresent: req.nextUrl.searchParams.has("secret"),
+    querySecretMatches: Boolean(secret && querySecret && querySecret === secret),
+    authorizationHeaderMatches: Boolean(
+      secret && authHeader === `Bearer ${secret}`,
+    ),
+  });
+}
+
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
@@ -19,6 +35,8 @@ function isAuthorized(req: NextRequest): boolean {
 }
 
 export async function GET(req: NextRequest) {
+  logAuthDebug(req);
+
   if (!isAuthorized(req)) {
     console.warn("[api/send-daily-digest] Unauthorized request");
     return NextResponse.json(
