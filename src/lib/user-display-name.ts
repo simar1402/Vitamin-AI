@@ -13,6 +13,17 @@ function firstNameFromFullName(fullName: string): string {
   return capitalize(trimmed.split(/\s+/)[0] ?? trimmed);
 }
 
+/** Extract first name from a full display name or email fallback. */
+export function getFirstName(
+  fullName?: string | null,
+  email?: string | null,
+): string {
+  if (fullName?.trim()) {
+    return firstNameFromFullName(fullName);
+  }
+  return getDisplayNameFromEmail(email);
+}
+
 /**
  * Derive a friendly first name from the user's email local part.
  * Used only when OAuth / profile name is unavailable.
