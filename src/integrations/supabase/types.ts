@@ -24,6 +24,7 @@ export type Database = {
           onboarded: boolean
           profession: string | null
           updated_at: string
+          welcome_email_sent: boolean
         }
         Insert: {
           content_types?: string[]
@@ -34,6 +35,7 @@ export type Database = {
           onboarded?: boolean
           profession?: string | null
           updated_at?: string
+          welcome_email_sent?: boolean
         }
         Update: {
           content_types?: string[]
@@ -44,6 +46,7 @@ export type Database = {
           onboarded?: boolean
           profession?: string | null
           updated_at?: string
+          welcome_email_sent?: boolean
         }
         Relationships: []
       }

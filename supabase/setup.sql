@@ -10,6 +10,7 @@ create table if not exists public.profiles (
   content_types text[] not null default '{}',
   interests text[] not null default '{}',
   onboarded boolean not null default false,
+  welcome_email_sent boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

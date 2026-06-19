@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { agentLog, userIdHint } from "@/lib/debug-agent-log";
+import { maybeSendWelcomeEmail } from "@/lib/welcome-email/send-welcome-email";
 
 const PrefsSchema = z.object({
   profession: z.string().min(1).max(80),
@@ -135,6 +136,23 @@ export async function PUT(req: Request) {
     },
     "H1",
   );
+
+  // One-time welcome email after onboarding completes (non-blocking for client)
+  if (onboarded && user.email) {
+    void maybeSendWelcomeEmail({
+      userId: user.id,
+      email: user.email,
+      fullName: resolvedName,
+    }).then((result) => {
+      console.info("[prefs/route.ts:PUT] welcome email result", {
+        userHint: userIdHint(user.id),
+        sent: result.sent,
+        skipped: result.skipped,
+        reason: result.reason ?? null,
+        error: result.error ?? null,
+      });
+    });
+  }
 
   return NextResponse.json({ ok: true });
 }
