@@ -191,7 +191,7 @@ export function computeFieldRelevance(item: FeedItem, professionOrIndustry: stri
     return Math.min(domainScore * 0.4, 0.38);
   }
 
-  let aiMultiplier = hasStrongAiSignal(title) ? 1.0 : hasStrongAiSignal(body) ? 0.9 : 0.82;
+  const aiMultiplier = hasStrongAiSignal(title) ? 1.0 : hasStrongAiSignal(body) ? 0.9 : 0.82;
   if (hasAiMention(title)) domainScore += 0.12;
 
   let score = Math.min(domainScore * aiMultiplier, 1);

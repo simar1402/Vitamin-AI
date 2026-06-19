@@ -711,7 +711,7 @@ export const youtubeProvider: FeedProvider = {
     const regular    = allQueries.filter((q) => !q.endsWith(" shorts")).slice(0, 5);
     const shorts     = allQueries.filter((q) =>  q.endsWith(" shorts")).slice(0, 3);
 
-    let searchItems: ScoredItem[] = [];
+    const searchItems: ScoredItem[] = [];
     let quotaHit = false;
 
     const searchResults = await Promise.allSettled([

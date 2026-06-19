@@ -50,7 +50,7 @@ export function isWrapperOrSearchUrl(url: string): boolean {
  * Produce a one-line snippet for cards — never raw HTML or duplicate titles.
  */
 export function formatStorySummary(title: string, raw: string, sourceName?: string): string {
-  let text = stripHtml(raw)
+  const text = stripHtml(raw)
     .replace(/https?:\/\/\S+/g, "")
     .replace(/\s+/g, " ")
     .trim();
