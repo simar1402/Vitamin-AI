@@ -99,6 +99,16 @@ export async function sendWelcomeEmailOnce(params: {
 
   const firstName = getFirstName(fullName ?? profile.full_name, email);
 
+  // ── DIAG: sendWelcomeEmailOnce entered (Resend about to be called) ─────────
+  console.info("[DIAG:welcome] resend_send_attempted", {
+    userEmail: email,
+    userIdHint: userId.slice(0, 8),
+    from: getResendFromAddress(),
+    subject: WELCOME_EMAIL_SUBJECT,
+    resendConfigured: Boolean(process.env.RESEND_API_KEY),
+    ts: new Date().toISOString(),
+  });
+
   try {
     const resend = getResendClient();
     const from = getResendFromAddress();
@@ -126,6 +136,14 @@ export async function sendWelcomeEmailOnce(params: {
     });
 
     if (error) {
+      // ── DIAG: Resend returned an error ─────────────────────────────────────
+      console.error("[DIAG:welcome] resend_error", {
+        userEmail: email,
+        error: error.message,
+        resendStatusCode: (error as { statusCode?: number }).statusCode ?? null,
+        ts: new Date().toISOString(),
+      });
+
       logWelcomeEmail("resend_error", {
         userEmail: email,
         emailSent: false,
@@ -139,6 +157,13 @@ export async function sendWelcomeEmailOnce(params: {
         welcomeEmailSentBefore,
       };
     }
+
+    // ── DIAG: Resend success ───────────────────────────────────────────────
+    console.info("[DIAG:welcome] resend_success", {
+      userEmail: email,
+      messageId: data?.id ?? null,
+      ts: new Date().toISOString(),
+    });
 
     const flagResult = await markWelcomeEmailSent(supabase, userId);
 
@@ -180,6 +205,12 @@ export async function sendWelcomeEmailOnce(params: {
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected send error";
+    // ── DIAG: uncaught exception inside sendWelcomeEmailOnce ─────────────────
+    console.error("[DIAG:welcome] resend_exception", {
+      userEmail: email,
+      error: message,
+      ts: new Date().toISOString(),
+    });
     logWelcomeEmail("exception", {
       userEmail: email,
       emailSent: false,

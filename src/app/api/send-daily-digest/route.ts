@@ -67,6 +67,13 @@ export async function GET(req: NextRequest) {
   const testMode = req.nextUrl.searchParams.get("test") === "true";
   const cronTrigger = req.headers.get("x-vercel-cron") === "1";
 
+  // ── DIAG: cron route entered ─────────────────────────────────────────────
+  console.info("[DIAG:digest] cron_route_entered", {
+    cronTrigger,
+    testMode,
+    ts: new Date().toISOString(),
+  });
+
   try {
     console.info(
       `[api/send-daily-digest] Triggered (test=${testMode}, cron=${cronTrigger})`,
@@ -77,6 +84,16 @@ export async function GET(req: NextRequest) {
       usersFound: summary.usersFound,
       emailsSent: summary.sent,
       emailsFailed: summary.failed,
+    });
+
+    // ── DIAG: cron route finished ─────────────────────────────────────────
+    console.info("[DIAG:digest] cron_route_finished", {
+      cronTrigger,
+      testMode,
+      usersFound: summary.usersFound,
+      emailsSent: summary.sent,
+      emailsFailed: summary.failed,
+      ts: new Date().toISOString(),
     });
 
     const status = summary.sent > 0 ? 200 : summary.failed > 0 ? 207 : 200;
@@ -99,6 +116,12 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected error";
     console.error("[api/send-daily-digest]", message);
+    console.error("[DIAG:digest] cron_route_exception", {
+      cronTrigger,
+      testMode,
+      error: message,
+      ts: new Date().toISOString(),
+    });
 
     return NextResponse.json(
       {

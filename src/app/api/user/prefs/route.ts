@@ -81,11 +81,24 @@ export async function PUT(req: Request) {
     user.user_metadata?.name ??
     null;
 
+  // ── DIAG: onboarding started ──────────────────────────────────────────────
+  console.info("[DIAG:welcome] onboarding_started", {
+    userEmail: user.email ?? null,
+    userIdHint: user.id.slice(0, 8),
+    onboarded,
+    profession: profession || null,
+    ts: new Date().toISOString(),
+  });
+
   const existingState = await loadWelcomeEmailProfileState(supabase, user.id);
   const existingProfile = existingState.ok ? existingState.profile : null;
 
   if (!existingState.ok) {
-    console.error("[prefs/route.ts:PUT] Failed to load existing profile:", existingState.error);
+    console.error("[DIAG:welcome] profile_load_error", {
+      userEmail: user.email ?? null,
+      error: existingState.error,
+      ts: new Date().toISOString(),
+    });
   }
 
   const welcomeEmailSentBefore = existingProfile?.welcome_email_sent ?? false;
@@ -123,16 +136,36 @@ export async function PUT(req: Request) {
 
   if (error) {
     console.error("[api/user/prefs PUT]", error.message);
+    console.error("[DIAG:welcome] profile_upsert_failed", {
+      userEmail: user.email ?? null,
+      error: error.message,
+      ts: new Date().toISOString(),
+    });
     return NextResponse.json({ error: "Failed to save profile" }, { status: 500 });
   }
+
+  // ── DIAG: onboarding completed (profile saved to DB) ─────────────────────
+  console.info("[DIAG:welcome] onboarding_completed", {
+    userEmail: user.email ?? null,
+    userIdHint: user.id.slice(0, 8),
+    onboarded,
+    shouldSendWelcomeEmail,
+    welcomeEmailSentBefore,
+    resendConfigured: Boolean(process.env.RESEND_API_KEY),
+    resendFrom: process.env.RESEND_FROM ?? "VitaminAI <onboarding@resend.dev>",
+    ts: new Date().toISOString(),
+  });
 
   let welcomeEmailResult = null;
 
   if (shouldSendWelcomeEmail && user.email) {
-    logWelcomeEmailProd("send_function_called", {
+    // ── DIAG: sendWelcomeEmailOnce called ────────────────────────────────────
+    console.info("[DIAG:welcome] send_welcome_email_once_called", {
       userEmail: user.email,
+      userIdHint: user.id.slice(0, 8),
       shouldSendWelcomeEmail: true,
-      welcomeEmailSent: welcomeEmailSentBefore,
+      welcomeEmailSentBefore,
+      ts: new Date().toISOString(),
     });
 
     welcomeEmailResult = await sendWelcomeEmailOnce({
@@ -142,6 +175,19 @@ export async function PUT(req: Request) {
       fullName: resolvedName,
       profession,
       shouldSendWelcomeEmail,
+    });
+
+    // ── DIAG: final outcome from sendWelcomeEmailOnce ────────────────────────
+    console.info("[DIAG:welcome] send_welcome_email_once_returned", {
+      userEmail: user.email,
+      sent: welcomeEmailResult.sent,
+      skipped: welcomeEmailResult.skipped,
+      skipReason: welcomeEmailResult.reason ?? null,
+      messageId: welcomeEmailResult.messageId ?? null,
+      error: welcomeEmailResult.error ?? null,
+      welcomeEmailSentBefore: welcomeEmailResult.welcomeEmailSentBefore ?? welcomeEmailSentBefore,
+      welcomeEmailSentAfter: welcomeEmailResult.welcomeEmailSentAfter ?? welcomeEmailSentBefore,
+      ts: new Date().toISOString(),
     });
 
     logWelcomeEmail("route_finished", {
@@ -157,6 +203,14 @@ export async function PUT(req: Request) {
       reason: welcomeEmailResult.reason ?? null,
     });
   } else if (onboarded && user.email) {
+    console.info("[DIAG:welcome] send_welcome_email_gate_blocked", {
+      userEmail: user.email,
+      reason: welcomeEmailSentBefore ? "already_sent" : "ineligible",
+      welcomeEmailSentBefore,
+      shouldSendWelcomeEmail,
+      ts: new Date().toISOString(),
+    });
+
     logWelcomeEmail("route_skipped", {
       userEmail: user.email,
       shouldSendWelcomeEmail: false,
