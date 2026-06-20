@@ -1,7 +1,5 @@
 import type { FeedStory } from "@/lib/client-rss";
 import type { UserProfilePrefs } from "@/lib/user-prefs-types";
-import { agentLog } from "@/lib/debug-agent-log";
-import { isProfileComplete } from "@/lib/user-prefs-types";
 
 async function fetchWithTimeout(
   url: string,
@@ -34,22 +32,9 @@ async function parseJson<T>(res: Response): Promise<T | null> {
 export async function fetchPrefsFromApi(): Promise<UserProfilePrefs | null> {
   try {
     const res = await fetchWithTimeout("/api/user/prefs", { method: "GET", credentials: "include" });
-    agentLog(
-      "user-prefs-api:fetchPrefs",
-      "response",
-      { status: res.status, ok: res.ok },
-      "H2",
-    );
     if (res.status === 401) return null;
     const data = await parseJson<{ profile: UserProfilePrefs | null }>(res);
-    const profile = data?.profile ?? null;
-    agentLog(
-      "user-prefs-api:fetchPrefs",
-      "parsed profile",
-      { complete: isProfileComplete(profile), hasProfile: !!profile },
-      "H3",
-    );
-    return profile;
+    return data?.profile ?? null;
   } catch (err) {
     console.error("[user-prefs-api] fetch prefs failed:", err);
     return null;
@@ -69,14 +54,7 @@ export async function savePrefsToApi(
     });
     if (res.status === 401) return false;
     const data = await parseJson<{ ok: true }>(res);
-    const ok = data?.ok === true;
-    agentLog(
-      "user-prefs-api:savePrefs",
-      "result",
-      { status: res.status, ok, profession: prefs.profession, onboarded: prefs.onboarded },
-      "H5",
-    );
-    return ok;
+    return data?.ok === true;
   } catch (err) {
     console.error("[user-prefs-api] save prefs failed:", err);
     return false;

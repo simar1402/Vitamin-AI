@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { agentLog, userIdHint } from "@/lib/debug-agent-log";
+import { logWelcomeEmail } from "@/lib/welcome-email/log";
+import { loadWelcomeEmailProfileState } from "@/lib/welcome-email/profile-state";
 import { sendWelcomeEmailOnce } from "@/lib/welcome-email/send-welcome-email";
 
 const PrefsSchema = z.object({
@@ -19,39 +20,19 @@ export async function GET() {
   } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    agentLog("prefs/route.ts:GET", "unauthorized", { authError: authError?.message ?? null }, "H2");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("profession, content_types, onboarded, full_name, welcome_email_sent")
+    .select("profession, content_types, onboarded, full_name")
     .eq("id", user.id)
     .maybeSingle();
 
   if (error) {
     console.error("[api/user/prefs GET]", error.message);
-    agentLog(
-      "prefs/route.ts:GET",
-      "select failed",
-      { userHint: userIdHint(user.id), code: error.code, message: error.message },
-      "H1",
-    );
     return NextResponse.json({ error: "Failed to load profile" }, { status: 500 });
   }
-
-  agentLog(
-    "prefs/route.ts:GET",
-    "profile loaded",
-    {
-      userHint: userIdHint(user.id),
-      hasRow: !!data,
-      onboarded: data?.onboarded ?? false,
-      hasProfession: !!data?.profession,
-      contentTypesLen: data?.content_types?.length ?? 0,
-    },
-    "H3",
-  );
 
   if (!data) {
     return NextResponse.json({ profile: null });
@@ -75,15 +56,8 @@ export async function PUT(req: Request) {
   } = await supabase.auth.getUser();
 
   if (authError || !user) {
-    agentLog("prefs/route.ts:PUT", "unauthorized", { authError: authError?.message ?? null }, "H2");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  console.info("[prefs/route.ts:PUT] Profile save request", {
-    userHint: userIdHint(user.id),
-    emailPresent: Boolean(user.email),
-    authCreatedAt: user.created_at ?? null,
-  });
 
   let body: unknown;
   try {
@@ -107,50 +81,28 @@ export async function PUT(req: Request) {
     user.user_metadata?.name ??
     null;
 
-  // Load existing profile BEFORE upsert to detect first-time onboarding completion
-  const { data: existingProfile, error: existingError } = await supabase
-    .from("profiles")
-    .select("onboarded, welcome_email_sent, profession, created_at")
-    .eq("id", user.id)
-    .maybeSingle();
+  const existingState = await loadWelcomeEmailProfileState(supabase, user.id);
+  const existingProfile = existingState.ok ? existingState.profile : null;
 
-  if (existingError) {
-    console.error("[prefs/route.ts:PUT] Failed to load existing profile:", existingError.message);
-  } else if (!existingProfile) {
-    console.info("[prefs/route.ts:PUT] Profile created — first save for user", {
-      userHint: userIdHint(user.id),
-    });
-  } else {
-    console.info("[prefs/route.ts:PUT] Existing profile loaded", {
-      userHint: userIdHint(user.id),
-      wasOnboarded: existingProfile.onboarded,
-      welcomeEmailSent: existingProfile.welcome_email_sent ?? false,
-      previousProfession: existingProfile.profession,
-    });
+  if (!existingState.ok) {
+    console.error("[prefs/route.ts:PUT] Failed to load existing profile:", existingState.error);
   }
 
-  console.info("[prefs/route.ts:PUT] Profession selected", {
-    userHint: userIdHint(user.id),
-    profession,
-    onboarded,
-  });
+  const welcomeEmailSentBefore = existingProfile?.welcome_email_sent ?? false;
 
-  const wasOnboarded = existingProfile?.onboarded ?? false;
-  const welcomeAlreadySent = existingProfile?.welcome_email_sent ?? false;
-  const isFirstOnboardingCompletion =
+  const shouldSendWelcomeEmail =
     onboarded &&
-    !wasOnboarded &&
-    !welcomeAlreadySent &&
+    !welcomeEmailSentBefore &&
     Boolean(profession) &&
     Boolean(user.email);
 
-  if (isFirstOnboardingCompletion) {
-    console.info("[prefs/route.ts:PUT] New user detected — first onboarding completion", {
-      userHint: userIdHint(user.id),
-      email: user.email,
-      profession,
-    });
-  }
+  logWelcomeEmail("gate", {
+    userEmail: user.email ?? null,
+    shouldSendWelcomeEmail,
+    welcomeEmailSentBefore,
+    onboarded,
+    hasProfession: Boolean(profession),
+  });
 
   const { error } = await supabase.from("profiles").upsert(
     {
@@ -167,57 +119,40 @@ export async function PUT(req: Request) {
 
   if (error) {
     console.error("[api/user/prefs PUT]", error.message);
-    agentLog(
-      "prefs/route.ts:PUT",
-      "upsert failed",
-      { userHint: userIdHint(user.id), code: error.code, message: error.message },
-      "H1",
-    );
     return NextResponse.json({ error: "Failed to save profile" }, { status: 500 });
   }
 
-  console.info("[prefs/route.ts:PUT] Profile saved successfully", {
-    userHint: userIdHint(user.id),
-    profession,
-    onboarded,
-  });
-
-  agentLog(
-    "prefs/route.ts:PUT",
-    "upsert ok",
-    {
-      userHint: userIdHint(user.id),
-      profession,
-      contentTypesLen: contentTypes.length,
-      onboarded,
-    },
-    "H1",
-  );
-
   let welcomeEmailResult = null;
 
-  // Await send — fire-and-forget is killed when the Vercel function returns
-  if (isFirstOnboardingCompletion && user.email) {
+  if (shouldSendWelcomeEmail && user.email) {
     welcomeEmailResult = await sendWelcomeEmailOnce({
+      supabase,
       userId: user.id,
       email: user.email,
       fullName: resolvedName,
       profession,
+      shouldSendWelcomeEmail,
     });
 
-    console.info("[prefs/route.ts:PUT] Welcome email flow finished", {
-      userHint: userIdHint(user.id),
-      sent: welcomeEmailResult.sent,
+    logWelcomeEmail("route_finished", {
+      userEmail: user.email,
+      shouldSendWelcomeEmail,
+      emailSent: welcomeEmailResult.sent,
+      welcomeEmailSentBefore: welcomeEmailResult.welcomeEmailSentBefore ?? welcomeEmailSentBefore,
+      welcomeEmailSentAfter: welcomeEmailResult.welcomeEmailSentAfter ?? welcomeEmailSentBefore,
       skipped: welcomeEmailResult.skipped,
       reason: welcomeEmailResult.reason ?? null,
       error: welcomeEmailResult.error ?? null,
       messageId: welcomeEmailResult.messageId ?? null,
     });
   } else if (onboarded && user.email) {
-    console.info("[prefs/route.ts:PUT] Welcome email skipped — not first onboarding", {
-      userHint: userIdHint(user.id),
-      wasOnboarded,
-      welcomeAlreadySent,
+    logWelcomeEmail("route_skipped", {
+      userEmail: user.email,
+      shouldSendWelcomeEmail: false,
+      emailSent: false,
+      welcomeEmailSentBefore,
+      welcomeEmailSentAfter: welcomeEmailSentBefore,
+      reason: welcomeEmailSentBefore ? "already_sent" : "ineligible",
     });
   }
 

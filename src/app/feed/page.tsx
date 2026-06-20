@@ -15,10 +15,10 @@ import {
   getContentTypes,
   setContentTypes as saveContentTypes,
   setProfession as saveProfession,
-  setOnboarded,
   toggleSavedId,
   getSavedIds,
   consumeShowWelcomeLoader,
+  isOnboarded,
 } from "@/lib/local-prefs";
 import { FeedSidebar } from "@/components/layout/feed-sidebar";
 import { ReturningUserLoading } from "@/components/layout/returning-user-loading";
@@ -99,9 +99,9 @@ export default function FeedPage() {
       const data = (await res.json()) as { stories: FeedStory[]; count: number };
       setStories(data.stories ?? []);
       saveContentTypes(types);
-      setOnboarded();
       if (user) {
-        void saveProfile({ profession: prof, contentTypes: types, onboarded: true });
+        const onboarded = isOnboarded();
+        void saveProfile({ profession: prof, contentTypes: types, onboarded });
       }
     } catch (e) {
       if (fetchRef.current !== token) return;
@@ -125,7 +125,11 @@ export default function FeedPage() {
     saveProfession(id);
     setStories([]);
     if (user) {
-      void saveProfile({ profession: id, contentTypes, onboarded: true });
+      void saveProfile({
+        profession: id,
+        contentTypes,
+        onboarded: isOnboarded(),
+      });
     }
   };
 

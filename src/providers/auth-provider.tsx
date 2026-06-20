@@ -11,7 +11,6 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { clearPreferences } from "@/lib/local-prefs";
-import { agentLog, userIdHint } from "@/lib/debug-agent-log";
 import { getAuthCallbackUrl, getClientSiteUrl } from "@/lib/site-url";
 
 interface AuthContextValue {
@@ -90,12 +89,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
 
   const signOut = useCallback(async () => {
-    agentLog(
-      "auth-provider:signOut",
-      "clearing local prefs",
-      { userHint: userIdHint(session?.user?.id) },
-      "H4",
-    );
     clearPreferences();
     await supabase.auth.signOut();
     window.location.replace("/");

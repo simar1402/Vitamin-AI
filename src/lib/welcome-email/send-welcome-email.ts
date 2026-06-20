@@ -1,6 +1,8 @@
-import { getSupabaseAdmin } from "@/integrations/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getResendClient, getResendFromAddress } from "@/lib/resend";
 import { getFirstName } from "@/lib/user-display-name";
+import { logWelcomeEmail } from "./log";
+import { loadWelcomeEmailProfileState, markWelcomeEmailSent } from "./profile-state";
 import {
   buildWelcomeEmailHtml,
   buildWelcomeEmailText,
@@ -13,85 +15,102 @@ export interface WelcomeEmailResult {
   reason?: string;
   messageId?: string;
   error?: string;
+  welcomeEmailSentBefore?: boolean;
+  welcomeEmailSentAfter?: boolean;
 }
 
 /**
- * Send the one-time welcome email. Caller must verify first-time onboarding completion.
- * Idempotent guard: only sends when welcome_email_sent is false.
+ * Send the one-time welcome email. Caller must verify eligibility.
+ * Uses the authenticated session client — no service-role key required.
  */
 export async function sendWelcomeEmailOnce(params: {
+  supabase: SupabaseClient;
   userId: string;
   email: string;
   fullName?: string | null;
   profession: string;
+  shouldSendWelcomeEmail: boolean;
 }): Promise<WelcomeEmailResult> {
-  const { userId, email, fullName, profession } = params;
+  const { supabase, userId, email, fullName, profession, shouldSendWelcomeEmail } = params;
 
-  console.info("[welcome-email] Welcome email send attempt", {
+  logWelcomeEmail("send_attempt", {
+    userEmail: email,
     userIdHint: userId.slice(0, 8),
-    emailPresent: Boolean(email),
+    shouldSendWelcomeEmail,
     profession,
   });
 
   if (!email) {
-    console.warn("[welcome-email] Skipped — no email on user record");
+    logWelcomeEmail("skipped", { userEmail: null, emailSent: false, reason: "no_email" });
     return { sent: false, skipped: true, reason: "no_email" };
   }
 
-  let admin;
-  try {
-    admin = getSupabaseAdmin();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "admin_client_unavailable";
-    console.error("[welcome-email] Supabase admin unavailable:", message);
-    return { sent: false, skipped: true, reason: "admin_unavailable", error: message };
+  const profileState = await loadWelcomeEmailProfileState(supabase, userId);
+
+  if (!profileState.ok) {
+    logWelcomeEmail("profile_load_failed", {
+      userEmail: email,
+      emailSent: false,
+      error: profileState.error,
+    });
+    return { sent: false, skipped: true, reason: "profile_load_failed", error: profileState.error };
   }
 
-  const { data: profile, error: profileError } = await admin
-    .from("profiles")
-    .select("welcome_email_sent, onboarded, full_name, profession")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (profileError) {
-    console.error("[welcome-email] Failed to load profile:", profileError.message);
-    return { sent: false, skipped: true, reason: "profile_load_failed", error: profileError.message };
-  }
+  const { profile, columnMissing } = profileState;
 
   if (!profile) {
-    console.warn("[welcome-email] Skipped — profile row not found after save");
+    logWelcomeEmail("skipped", {
+      userEmail: email,
+      emailSent: false,
+      reason: "profile_not_found",
+    });
     return { sent: false, skipped: true, reason: "profile_not_found" };
   }
 
-  console.info("[welcome-email] Profile state before send", {
-    userIdHint: userId.slice(0, 8),
+  const welcomeEmailSentBefore = profile.welcome_email_sent;
+
+  logWelcomeEmail("profile_before_send", {
+    userEmail: email,
+    shouldSendWelcomeEmail,
+    welcomeEmailSentBefore,
     onboarded: profile.onboarded,
-    welcomeEmailSent: profile.welcome_email_sent,
-    profession: profile.profession,
+    columnMissing,
   });
 
   if (!profile.onboarded) {
-    console.info("[welcome-email] Skipped — user not onboarded yet");
-    return { sent: false, skipped: true, reason: "not_onboarded" };
+    logWelcomeEmail("skipped", {
+      userEmail: email,
+      emailSent: false,
+      welcomeEmailSentBefore,
+      reason: "not_onboarded",
+    });
+    return { sent: false, skipped: true, reason: "not_onboarded", welcomeEmailSentBefore };
   }
 
   if (profile.welcome_email_sent) {
-    console.info("[welcome-email] Skipped — welcome email already sent");
-    return { sent: false, skipped: true, reason: "already_sent" };
+    logWelcomeEmail("skipped", {
+      userEmail: email,
+      emailSent: false,
+      welcomeEmailSentBefore,
+      reason: "already_sent",
+    });
+    return { sent: false, skipped: true, reason: "already_sent", welcomeEmailSentBefore };
   }
 
   const firstName = getFirstName(fullName ?? profile.full_name, email);
-  console.info(`[welcome-email] Sending welcome email to ${email}`);
 
   try {
     const resend = getResendClient();
-    console.info("[welcome-email] Resend API call starting", {
-      userIdHint: userId.slice(0, 8),
-      to: email,
+    const from = getResendFromAddress();
+
+    logWelcomeEmail("resend_call_start", {
+      userEmail: email,
+      from,
+      subject: WELCOME_EMAIL_SUBJECT,
     });
 
     const { data, error } = await resend.emails.send({
-      from: getResendFromAddress(),
+      from,
       to: [email],
       subject: WELCOME_EMAIL_SUBJECT,
       html: buildWelcomeEmailHtml(firstName),
@@ -99,48 +118,71 @@ export async function sendWelcomeEmailOnce(params: {
     });
 
     if (error) {
-      console.error(`[welcome-email] Resend API error for ${email}:`, error.message);
-      return { sent: false, skipped: false, error: error.message };
+      logWelcomeEmail("resend_error", {
+        userEmail: email,
+        emailSent: false,
+        welcomeEmailSentBefore,
+        error: error.message,
+      });
+      return {
+        sent: false,
+        skipped: false,
+        error: error.message,
+        welcomeEmailSentBefore,
+      };
     }
 
-    console.info(`[welcome-email] Welcome email sent successfully to ${email}`, {
-      messageId: data?.id ?? null,
-    });
+    const flagResult = await markWelcomeEmailSent(supabase, userId);
 
-    const { error: updateError, count } = await admin
-      .from("profiles")
-      .update(
-        {
-          welcome_email_sent: true,
-          updated_at: new Date().toISOString(),
-        },
-        { count: "exact" },
-      )
-      .eq("id", userId)
-      .eq("welcome_email_sent", false);
-
-    if (updateError) {
-      console.error("[welcome-email] welcome_email_sent update failed:", updateError.message);
+    if (!flagResult.ok) {
+      logWelcomeEmail("flag_update_failed", {
+        userEmail: email,
+        emailSent: true,
+        welcomeEmailSentBefore,
+        messageId: data?.id ?? null,
+        error: flagResult.error,
+        columnMissing: flagResult.columnMissing,
+      });
       return {
         sent: true,
         skipped: false,
         messageId: data?.id,
-        error: `sent_but_flag_update_failed: ${updateError.message}`,
+        welcomeEmailSentBefore,
+        error: flagResult.columnMissing
+          ? "sent_but_welcome_email_sent_column_missing"
+          : `sent_but_flag_update_failed: ${flagResult.error}`,
       };
     }
 
-    if (count === 0) {
-      console.warn("[welcome-email] welcome_email_sent not updated — row may already be marked sent");
-    } else {
-      console.info("[welcome-email] welcome_email_sent updated to TRUE", {
-        userIdHint: userId.slice(0, 8),
-      });
-    }
+    logWelcomeEmail("success", {
+      userEmail: email,
+      emailSent: true,
+      shouldSendWelcomeEmail,
+      welcomeEmailSentBefore: flagResult.welcomeEmailSentBefore,
+      welcomeEmailSentAfter: flagResult.welcomeEmailSentAfter,
+      messageId: data?.id ?? null,
+    });
 
-    return { sent: true, skipped: false, messageId: data?.id };
+    return {
+      sent: true,
+      skipped: false,
+      messageId: data?.id,
+      welcomeEmailSentBefore: flagResult.welcomeEmailSentBefore,
+      welcomeEmailSentAfter: flagResult.welcomeEmailSentAfter,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected send error";
-    console.error(`[welcome-email] Send failed for ${email}:`, message);
-    return { sent: false, skipped: false, error: message };
+    logWelcomeEmail("exception", {
+      userEmail: email,
+      emailSent: false,
+      welcomeEmailSentBefore,
+      error: message,
+    });
+    return {
+      sent: false,
+      skipped: false,
+      error: message,
+      welcomeEmailSentBefore,
+    };
   }
 }

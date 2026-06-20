@@ -36,7 +36,6 @@ import type { ProfessionId } from "@/lib/providers/profession-config";
 import { useUserPrefs } from "@/providers/user-prefs-provider";
 import { AppLoader } from "@/components/layout/app-loader";
 import { isProfileComplete } from "@/lib/user-prefs-sync";
-import { agentLog } from "@/lib/debug-agent-log";
 
 const PROFESSIONS = [
   {
@@ -158,27 +157,14 @@ export default function Onboarding() {
     saveContentTypes([...types]);
     setOnboarded();
     try {
-      agentLog(
-        "onboarding:finish",
-        "saving profile",
-        { profession, contentTypesLen: types.length },
-        "H5",
-      );
       await saveProfile({
         profession,
         contentTypes: [...types],
         onboarded: true,
       });
-      agentLog("onboarding:finish", "save succeeded", { profession }, "H5");
       setShowWelcomeLoader();
       router.push("/feed");
     } catch (err) {
-      agentLog(
-        "onboarding:finish",
-        "save failed",
-        { error: err instanceof Error ? err.message : String(err) },
-        "H5",
-      );
       console.error("[onboarding] failed to save profile:", err);
     }
   };
