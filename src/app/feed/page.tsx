@@ -21,6 +21,7 @@ import {
   isOnboarded,
 } from "@/lib/local-prefs";
 import { FeedSidebar } from "@/components/layout/feed-sidebar";
+import { MobileNav } from "@/components/layout/mobile-nav";
 import { ReturningUserLoading } from "@/components/layout/returning-user-loading";
 import { AppLoader } from "@/components/layout/app-loader";
 import { getDisplayNameFromUser, professionArticle } from "@/lib/user-display-name";
@@ -174,8 +175,9 @@ export default function FeedPage() {
         onChangeProfession={handleChangeProfession}
       />
 
-      <div className="ml-56 flex flex-1 flex-col min-w-0">
-        <main className="flex-1 px-8 py-10">
+      <MobileNav />
+      <div className="flex flex-1 flex-col min-w-0 lg:ml-56">
+        <main className="flex-1 px-4 py-6 pb-24 md:px-6 md:py-8 lg:px-8 lg:py-10 lg:pb-10">
           {!profession ? (
             <div className="flex flex-col items-center justify-center py-40 text-center">
               <p className="mb-3 text-4xl">🌿</p>

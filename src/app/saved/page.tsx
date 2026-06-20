@@ -6,6 +6,7 @@ import { Bookmark, BookOpen, Play, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { FeedSidebar } from "@/components/layout/feed-sidebar";
+import { MobileNav } from "@/components/layout/mobile-nav";
 import { FeedTabButton } from "@/components/feed/feed-tab-button";
 import { useAuth } from "@/providers/auth-provider";
 import { useUserPrefs } from "@/providers/user-prefs-provider";
@@ -101,8 +102,9 @@ export default function BookmarksPage() {
         onChangeProfession={handleChangeProfession}
       />
 
-      <div className="ml-56 flex flex-1 flex-col min-w-0">
-        <main className="flex-1 px-8 py-10">
+      <MobileNav />
+      <div className="flex flex-1 flex-col min-w-0 lg:ml-56">
+        <main className="flex-1 px-4 py-6 pb-24 md:px-6 md:py-8 lg:px-8 lg:py-10 lg:pb-10">
           <div className="mb-8">
             <p className="text-[12px] font-medium uppercase tracking-widest text-muted-foreground mb-1.5">
               Your collection

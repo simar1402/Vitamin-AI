@@ -42,7 +42,7 @@ export function FeedSidebar({
   const profConfig = PROFESSIONS.find((p) => p.id === profession);
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-56 flex-col border-r border-border bg-background">
+    <aside className="fixed left-0 top-0 z-40 hidden h-screen w-56 flex-col border-r border-border bg-background lg:flex">
       <div className="flex h-14 shrink-0 items-center px-4">
         <Link href="/" className="flex items-center">
           <Logo size="sm" />

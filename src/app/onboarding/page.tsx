@@ -344,7 +344,7 @@ export default function Onboarding() {
           </AnimatePresence>
 
           {/* Footer actions */}
-          <div className="mt-8 flex items-center justify-between gap-3 border-t border-border pt-6">
+          <div className="mt-8 flex items-center justify-between gap-3 border-t border-border pt-6 pb-safe">
             <div />
             {step < total - 1 ? (
               <Button
