@@ -117,6 +117,14 @@ export async function sendWelcomeEmailOnce(params: {
       text: buildWelcomeEmailText(firstName),
     });
 
+    logWelcomeEmail("resend_result", {
+      userEmail: email,
+      shouldSendWelcomeEmail,
+      welcomeEmailSentBefore,
+      resendResponse: data ?? null,
+      resendError: error?.message ?? null,
+    });
+
     if (error) {
       logWelcomeEmail("resend_error", {
         userEmail: email,

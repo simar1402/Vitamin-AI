@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { logWelcomeEmail } from "@/lib/welcome-email/log";
+import { logWelcomeEmail, logWelcomeEmailProd } from "@/lib/welcome-email/log";
 import { loadWelcomeEmailProfileState } from "@/lib/welcome-email/profile-state";
 import { sendWelcomeEmailOnce } from "@/lib/welcome-email/send-welcome-email";
 
@@ -99,9 +99,13 @@ export async function PUT(req: Request) {
   logWelcomeEmail("gate", {
     userEmail: user.email ?? null,
     shouldSendWelcomeEmail,
+    welcomeEmailSent: welcomeEmailSentBefore,
     welcomeEmailSentBefore,
     onboarded,
     hasProfession: Boolean(profession),
+    hasEmail: Boolean(user.email),
+    resendConfigured: Boolean(process.env.RESEND_API_KEY),
+    resendFrom: process.env.RESEND_FROM ?? "VitaminAI <onboarding@resend.dev>",
   });
 
   const { error } = await supabase.from("profiles").upsert(
@@ -125,6 +129,12 @@ export async function PUT(req: Request) {
   let welcomeEmailResult = null;
 
   if (shouldSendWelcomeEmail && user.email) {
+    logWelcomeEmailProd("send_function_called", {
+      userEmail: user.email,
+      shouldSendWelcomeEmail: true,
+      welcomeEmailSent: welcomeEmailSentBefore,
+    });
+
     welcomeEmailResult = await sendWelcomeEmailOnce({
       supabase,
       userId: user.id,
@@ -138,20 +148,24 @@ export async function PUT(req: Request) {
       userEmail: user.email,
       shouldSendWelcomeEmail,
       emailSent: welcomeEmailResult.sent,
+      welcomeEmailSent: welcomeEmailResult.welcomeEmailSentAfter ?? welcomeEmailSentBefore,
       welcomeEmailSentBefore: welcomeEmailResult.welcomeEmailSentBefore ?? welcomeEmailSentBefore,
       welcomeEmailSentAfter: welcomeEmailResult.welcomeEmailSentAfter ?? welcomeEmailSentBefore,
+      resendResponse: welcomeEmailResult.messageId ? { id: welcomeEmailResult.messageId } : null,
+      resendError: welcomeEmailResult.error ?? null,
       skipped: welcomeEmailResult.skipped,
       reason: welcomeEmailResult.reason ?? null,
-      error: welcomeEmailResult.error ?? null,
-      messageId: welcomeEmailResult.messageId ?? null,
     });
   } else if (onboarded && user.email) {
     logWelcomeEmail("route_skipped", {
       userEmail: user.email,
       shouldSendWelcomeEmail: false,
       emailSent: false,
+      welcomeEmailSent: welcomeEmailSentBefore,
       welcomeEmailSentBefore,
       welcomeEmailSentAfter: welcomeEmailSentBefore,
+      resendResponse: null,
+      resendError: null,
       reason: welcomeEmailSentBefore ? "already_sent" : "ineligible",
     });
   }
